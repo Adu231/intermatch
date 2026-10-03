@@ -1,0 +1,25 @@
+{
+  "routes": [
+    { "path": "/", "title": "InternMatch" },
+    { "path": "/login", "title": "Log in" },
+    { "path": "/register", "title": "Create account" },
+    { "path": "/forgot-password", "title": "Reset password" },
+    { "path": "/internships", "title": "Find internships" },
+    { "path": "/internships/:id", "title": "Internship details" },
+    { "path": "/student/dashboard", "title": "Student dashboard" },
+    { "path": "/student/internships", "title": "Find internships" },
+    { "path": "/student/recommended", "title": "Recommended internships" },
+    { "path": "/student/applications", "title": "Applications" },
+    { "path": "/student/interviews", "title": "Interviews" },
+    { "path": "/student/saved", "title": "Saved internships" },
+    { "path": "/student/profile", "title": "My profile" },
+    { "path": "/recruiter/dashboard", "title": "Recruiter dashboard" },
+    { "path": "/recruiter/internships", "title": "My internships" },
+    { "path": "/recruiter/internships/create", "title": "Create internship" },
+    { "path": "/recruiter/internships/:id", "title": "Internship overview" },
+    { "path": "/recruiter/internships/:id/applicants", "title": "Applicants" },
+    { "path": "/recruiter/applicants/:id", "title": "Applicant profile" },
+    { "path": "/recruiter/interviews", "title": "Interviews" },
+    { "path": "/recruiter/company", "title": "Company profile" }
+  ]
+}
