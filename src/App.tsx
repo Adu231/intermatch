@@ -3,6 +3,7 @@ import {
   ArrowDownRight, ArrowLeft, ArrowRight, ArrowUpRight, AtSign, BarChart3, Bell, BriefcaseBusiness, CalendarDays, Check, CheckCircle2, ChevronDown, Clock3, Code2, Compass, Copy, FileText, Filter, GraduationCap, Heart, Home, LayoutGrid, Lock, LogOut, Mail, Menu, MessageCircle, MoreHorizontal, Pencil, Plus, RefreshCw, Search, Send, Settings, ShieldCheck, Sparkles, Star, Target, TrendingUp, Upload, UserRound, UsersRound, X, Zap,
 } from 'lucide-react'
 import { Application, ApplicationStatus, Applicant, Internship, Role, applicants as seedApplicants, applications as seedApplications, interviews as seedInterviews, internships as seedInternships } from './data/mockData'
+import { authService } from './services/authService'
 
 type Toast = { message: string; tone?: 'success' | 'info' | 'danger' }
 type Modal = 'apply' | 'invite' | 'details' | 'resume' | null
@@ -21,8 +22,8 @@ type AuthContextType = {
   currentUser: User | null
   userRole: Role | null
   isLoading: boolean
-  login: (email: string, role?: Role, redirectUrl?: string) => void
-  register: (name: string, email: string, role: Role, details?: any, redirectUrl?: string) => void
+  login: (email: string, password?: string, role?: Role, redirectUrl?: string) => Promise<{ success: boolean; message?: string }>
+  register: (name: string, email: string, password?: string, role?: Role, details?: any, redirectUrl?: string) => Promise<{ success: boolean; message?: string }>
   logout: () => void
   handleAuthError: (err: any) => void
 }
@@ -57,50 +58,50 @@ function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const login = (email: string, role?: Role, redirectUrl?: string) => {
-    const lower = email.toLowerCase()
-    const determinedRole: Role = role || ((lower.includes('recruiter') || lower.includes('technova') || lower.includes('hr')) ? 'recruiter' : 'student')
-    const user: User = determinedRole === 'recruiter'
-      ? { id: 'recruiter-001', name: 'TechNova Labs', email, role: 'recruiter', company: 'TechNova Labs' }
-      : { id: 'student-001', name: 'Maya Singh', email, role: 'student', college: 'RV College of Engineering' }
-
-    setCurrentUser(user)
+  const login = async (email: string, password = 'demo1234', role?: Role, redirectUrl?: string) => {
     try {
-      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ isAuthenticated: true, user }))
-    } catch (e) {
-      console.error('Failed to persist auth session:', e)
+      const res = await authService.login(email, password, role)
+      if (res?.success && res?.data?.user) {
+        const user = res.data.user
+        const token = res.data.token
+        setCurrentUser(user)
+        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ isAuthenticated: true, user, token }))
+        const defaultTarget = user.role === 'student' ? '/student/dashboard' : '/recruiter/dashboard'
+        const targetPath = redirectUrl || defaultTarget
+        window.history.pushState({}, '', targetPath)
+        window.dispatchEvent(new PopStateEvent('popstate'))
+        return { success: true }
+      } else {
+        return { success: false, message: res?.message || 'Invalid email or password' }
+      }
+    } catch (e: any) {
+      return { success: false, message: e.message || 'Login request failed' }
     }
-
-    const defaultTarget = determinedRole === 'student' ? '/student/dashboard' : '/recruiter/dashboard'
-    const targetPath = redirectUrl || defaultTarget
-    window.history.pushState({}, '', targetPath)
-    window.dispatchEvent(new PopStateEvent('popstate'))
   }
 
-  const register = (name: string, email: string, role: Role, details?: any, redirectUrl?: string) => {
-    const user: User = {
-      id: `user-${Date.now()}`,
-      name: name || (role === 'student' ? 'Maya Singh' : 'TechNova Team'),
-      email,
-      role,
-      college: details?.college,
-      company: details?.company
-    }
-
-    setCurrentUser(user)
+  const register = async (name: string, email: string, password = 'demo1234', role: Role = 'student', details?: any, redirectUrl?: string) => {
     try {
-      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ isAuthenticated: true, user }))
-    } catch (e) {
-      console.error('Failed to persist auth session:', e)
+      const res = await authService.register(name, email, password, role, details)
+      if (res?.success && res?.data?.user) {
+        const user = res.data.user
+        const token = res.data.token
+        setCurrentUser(user)
+        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({ isAuthenticated: true, user, token }))
+        const defaultTarget = user.role === 'student' ? '/student/dashboard' : '/recruiter/dashboard'
+        const targetPath = redirectUrl || defaultTarget
+        window.history.pushState({}, '', targetPath)
+        window.dispatchEvent(new PopStateEvent('popstate'))
+        return { success: true }
+      } else {
+        return { success: false, message: res?.message || 'Registration failed' }
+      }
+    } catch (e: any) {
+      return { success: false, message: e.message || 'Registration request failed' }
     }
-
-    const defaultTarget = role === 'student' ? '/student/dashboard' : '/recruiter/dashboard'
-    const targetPath = redirectUrl || defaultTarget
-    window.history.pushState({}, '', targetPath)
-    window.dispatchEvent(new PopStateEvent('popstate'))
   }
 
   const logout = () => {
+    authService.logout().catch(() => {})
     setCurrentUser(null)
     try {
       localStorage.removeItem(AUTH_STORAGE_KEY)
@@ -510,21 +511,6 @@ function AuthPage({ initialRole = 'student', mode = 'login', navigate }: { initi
     setCaptchaError(false)
   }
 
-  // Quick Demo Login Handler
-  const handleDemoLogin = (demoRole: Role) => {
-    setError('')
-    setCaptchaError(false)
-    const demoEmail = demoRole === 'student' ? 'student@demo.com' : 'recruiter@demo.com'
-    setEmail(demoEmail)
-    setPassword('demo1234')
-    setUserCaptcha(String(captcha.answer))
-    setLoading(true)
-    setTimeout(() => {
-      setLoading(false)
-      login(demoEmail, demoRole, redirectParam || undefined)
-    }, 400)
-  }
-
   // Read URL query params for redirect
   const queryParams = useMemo(() => new URLSearchParams(window.location.search), [window.location.search])
   const redirectParam = queryParams.get('redirect')
@@ -537,7 +523,7 @@ function AuthPage({ initialRole = 'student', mode = 'login', navigate }: { initi
     }
   }, [isAuthenticated, currentUser, redirectParam, navigate])
 
-  const submit = (event: FormEvent) => {
+  const submit = async (event: FormEvent) => {
     event.preventDefault()
     if (mode === 'forgot') {
       setError('')
@@ -559,19 +545,29 @@ function AuthPage({ initialRole = 'student', mode = 'login', navigate }: { initi
     }
 
     setLoading(true)
-    setTimeout(() => {
-      setLoading(false)
+    setError('')
+    try {
       if (mode === 'login') {
         const lowerEmail = email.toLowerCase()
         const detectedRole: Role = (lowerEmail.includes('recruiter') || lowerEmail.includes('technova') || lowerEmail.includes('hr')) ? 'recruiter' : 'student'
-        login(email, detectedRole, redirectParam || undefined)
+        const res = await login(email, password, detectedRole, redirectParam || undefined)
+        if (res && !res.success) {
+          setError(res.message || 'Invalid email or password.')
+        }
       } else {
-        register(fullName || (role === 'student' ? 'Maya Singh' : 'TechNova Team'), email, role, { college: collegeName, company: businessName }, redirectParam || undefined)
+        const res = await register(fullName, email, password, role, { college: collegeName, company: businessName }, redirectParam || undefined)
+        if (res && !res.success) {
+          setError(res.message || 'Registration failed.')
+        }
       }
-    }, 500)
+    } catch (err: any) {
+      setError('Connection failed. Make sure the backend server is running.')
+    } finally {
+      setLoading(false)
+    }
   }
 
-  if (mode === 'forgot') return <div className="auth-page"><div className="auth-side"><Logo dark onClick={() => navigate('/')} /><div className="auth-side-copy"><p className="eyebrow">A calmer way forward</p><h1>Get back to your next chapter.</h1><p>We’ll send a reset link to your inbox. Demo mode keeps this flow frontend-only.</p></div></div><div className="auth-main"><button className="back-link" onClick={() => navigate('/login')}><ArrowLeft size={16} /> Back to login</button><div className="auth-form-wrap"><div className="auth-heading"><p className="eyebrow">Reset access</p><h2>Forgot your password?</h2><p className="muted">Enter your email and we’ll show the next step.</p></div><form onSubmit={submit}><label>Email address<input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" /></label>{error && <p className="form-error">{error}</p>}<Button type="submit" size="lg" className="full-width">Send reset link <ArrowRight size={16} /></Button></form><p className="auth-switch">Remembered it? <button onClick={() => navigate('/login')}>Log in</button></p></div></div></div>
+  if (mode === 'forgot') return <div className="auth-page"><div className="auth-side"><Logo dark onClick={() => navigate('/')} /><div className="auth-side-copy"><p className="eyebrow">A calmer way forward</p><h1>Get back to your next chapter.</h1><p>We’ll send a reset link to your inbox.</p></div></div><div className="auth-main"><button className="back-link" onClick={() => navigate('/login')}><ArrowLeft size={16} /> Back to login</button><div className="auth-form-wrap"><div className="auth-heading"><p className="eyebrow">Reset access</p><h2>Forgot your password?</h2><p className="muted">Enter your email and we’ll show the next step.</p></div><form onSubmit={submit}><label>Email address<input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" /></label>{error && <p className="form-error">{error}</p>}<Button type="submit" size="lg" className="full-width">Send reset link <ArrowRight size={16} /></Button></form><p className="auth-switch">Remembered it? <button onClick={() => navigate('/login')}>Log in</button></p></div></div></div>
 
   return <div className="auth-page">
     <div className="auth-side">
@@ -593,42 +589,8 @@ function AuthPage({ initialRole = 'student', mode = 'login', navigate }: { initi
         <div className="auth-heading">
           <p className="eyebrow">{mode === 'register' ? 'Create account' : 'Direct Sign-in'}</p>
           <h2>{mode === 'register' ? 'Tell us where you’re headed.' : 'Log in to InternMatch'}</h2>
-          <p className="muted">{mode === 'register' ? 'Select your role and fill in your details below.' : 'Enter your email address to automatically open your workspace.'}</p>
+          <p className="muted">{mode === 'register' ? 'Select your role and fill in your details below.' : 'Enter your credentials to enter your workspace.'}</p>
         </div>
-
-        {mode === 'login' && (
-          <div style={{
-            background: '#fff9f7',
-            border: '1px solid #f6d8d0',
-            borderRadius: '12px',
-            padding: '14px',
-            marginBottom: '20px'
-          }}>
-            <p style={{ margin: '0 0 10px 0', fontSize: '11px', fontWeight: 700, color: '#7a746d' }}>
-              ⚡ Quick Demo Credentials Login:
-            </p>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                style={{ justifyContent: 'center', borderColor: '#f0b9af', background: '#ffffff' }}
-                onClick={() => handleDemoLogin('student')}
-              >
-                <GraduationCap size={15} color="#ee6b52" />
-                <span>Demo Student</span>
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                style={{ justifyContent: 'center', borderColor: '#d6d5f0', background: '#ffffff' }}
-                onClick={() => handleDemoLogin('recruiter')}
-              >
-                <BriefcaseBusiness size={15} color="#5a55a8" />
-                <span>Demo Recruiter</span>
-              </button>
-            </div>
-          </div>
-        )}
 
         {mode === 'register' && (
           <div className="role-toggle">
