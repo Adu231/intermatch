@@ -4,6 +4,11 @@ import {
 } from 'lucide-react'
 import { Application, ApplicationStatus, Applicant, Internship, Role, applicants as seedApplicants, applications as seedApplications, interviews as seedInterviews, internships as seedInternships } from './data/mockData'
 import { authService } from './services/authService'
+import { internshipService } from './services/internshipService'
+import { applicationService } from './services/applicationService'
+import { studentService } from './services/studentService'
+import { recruiterService } from './services/recruiterService'
+import { interviewService } from './services/interviewService'
 
 type Toast = { message: string; tone?: 'success' | 'info' | 'danger' }
 type Modal = 'apply' | 'invite' | 'details' | 'resume' | null
@@ -917,13 +922,26 @@ function CreateInternship({ navigate, addInternship, notify }: { navigate: (path
   const [mode, setMode] = useState<Internship['mode']>('Remote')
   const [stipend, setStipend] = useState('₹10,000 / month')
   const [error, setError] = useState('')
-  const submit = (event: FormEvent) => {
+  const submit = async (event: FormEvent) => {
     event.preventDefault()
     if (!title.trim()) { setError('Give this opportunity a clear title before publishing.'); return }
-    const item: Internship = { ...seedInternships[0], id: `new-${Date.now()}`, title, location, mode, stipend, company: 'TechNova Labs', companyShort: 'TN', companyColor: '#ee6b52', posted: 'just now', deadline: 'Nov 15, 2026', match: 88 }
-    addInternship(item)
-    notify('Internship published — it’s now live in My internships.')
-    navigate('/recruiter/internships')
+    const payload = {
+      title,
+      location,
+      workMode: mode,
+      stipend,
+      description: 'Ship thoughtful product experiences with a small, ambitious team.',
+      requiredSkills: ['React', 'JavaScript', 'Git'],
+      status: 'Published'
+    }
+    try {
+      const res = await internshipService.create(payload as any)
+      addInternship(res)
+      notify('Internship published — it’s now live in My internships.')
+      navigate('/recruiter/internships')
+    } catch (e) {
+      setError('Failed to publish internship via API.')
+    }
   }
   const saveDraft = () => {
     notify('Draft saved successfully.', 'info')
@@ -1351,6 +1369,46 @@ function MainApp() {
     return () => window.removeEventListener('popstate', handlePopState)
   }, [])
 
+  // Sync state with real API endpoints
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const fetchedInternships = await internshipService.list()
+        if (fetchedInternships && fetchedInternships.length > 0) {
+          setInternshipList(fetchedInternships)
+        }
+      } catch (e) {
+        console.error('Failed to fetch internships from API:', e)
+      }
+
+      if (isAuthenticated && userRole === 'student') {
+        try {
+          const apps = await applicationService.getMyApplications()
+          if (apps && apps.length > 0) {
+            setApplications(apps)
+          }
+          const saved = await studentService.getSaved()
+          if (saved && Array.isArray(saved)) {
+            setSavedIds(saved.map((s: any) => s._id || s.id || s))
+          }
+        } catch (e) {
+          console.error('Failed to fetch student data from API:', e)
+        }
+      } else if (isAuthenticated && userRole === 'recruiter') {
+        try {
+          const myRoles = await internshipService.getMyInternships()
+          if (myRoles && myRoles.length > 0) {
+            setInternshipList(myRoles)
+          }
+        } catch (e) {
+          console.error('Failed to fetch recruiter data from API:', e)
+        }
+      }
+    }
+
+    fetchData()
+  }, [isAuthenticated, userRole])
+
   const navigate = (nextPath: string) => {
     window.history.pushState({}, '', nextPath)
     setPath(nextPath)
@@ -1362,16 +1420,27 @@ function MainApp() {
     setTimeout(() => setToast(null), 3500)
   }
 
-  const toggleSave = (id: string) => {
+  const toggleSave = async (id: string) => {
     if (!isAuthenticated) {
       notify('Please log in to save internships to your shortlist.', 'info')
       navigate(`/login?redirect=${encodeURIComponent('/internships/' + id)}`)
       return
     }
-    setSavedIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])
+    const isSaved = savedIds.includes(id)
+    setSavedIds((current) => isSaved ? current.filter((item) => item !== id) : [...current, id])
+
+    try {
+      if (isSaved) {
+        await studentService.removeSavedInternship(id)
+      } else {
+        await studentService.saveInternship(id)
+      }
+    } catch (e) {
+      console.error('Error toggling save on API:', e)
+    }
   }
 
-  const addApplication = (internshipId: string) => {
+  const addApplication = async (internshipId: string) => {
     if (!isAuthenticated) {
       notify('Please log in to apply for internships.', 'info')
       navigate(`/login?redirect=${encodeURIComponent('/internships/' + internshipId)}&action=apply`)
@@ -1382,17 +1451,44 @@ function MainApp() {
       return
     }
     if (applications.some((item) => item.internshipId === internshipId)) return
-    setApplications((current) => [{ id: `app-${Date.now()}`, internshipId, applied: 'Sep 29, 2026', updated: 'Sep 29, 2026', status: 'Applied', note: 'Your application was sent successfully.' }, ...current])
-    notify('Application sent — good luck with the next step.')
+
+    try {
+      const res = await applicationService.apply(internshipId)
+      const newApp = res?.data || { id: `app-${Date.now()}`, internshipId, applied: 'Sep 29, 2026', updated: 'Sep 29, 2026', status: 'Applied', note: 'Your application was sent successfully.' }
+      setApplications((current) => [newApp, ...current])
+      notify('Application sent — good luck with the next step.')
+    } catch (e) {
+      notify('Application failed to send.', 'danger')
+    }
   }
 
-  const updateApplicant = (id: string, status: ApplicationStatus) => {
+  const updateApplicant = async (id: string, status: ApplicationStatus) => {
     setApplicantList((current) => current.map((item) => item.id === id ? { ...item, status } : item))
+    try {
+      await applicationService.updateStatus(id, status)
+    } catch (e) {
+      console.error('Error updating applicant status on API:', e)
+    }
     notify(`Applicant moved to ${status}.`)
   }
 
-  const addInterview = (interview: typeof seedInterviews[number]) => setInterviewList((current) => [interview, ...current])
-  const addInternship = (item: Internship) => setInternshipList((current) => [item, ...current])
+  const addInterview = async (interview: typeof seedInterviews[number]) => {
+    setInterviewList((current) => [interview, ...current])
+    try {
+      await interviewService.create(interview)
+    } catch (e) {
+      console.error('Error creating interview on API:', e)
+    }
+  }
+
+  const addInternship = async (item: Internship) => {
+    try {
+      const res = await internshipService.create(item)
+      setInternshipList((current) => [res || item, ...current])
+    } catch (e) {
+      setInternshipList((current) => [item, ...current])
+    }
+  }
 
   const detailsId = !path.startsWith('/recruiter/') && path.match(/\/internships\/([^/]+)/)?.[1]
   const applicantId = path.match(/\/recruiter\/applicants\/([^/]+)/)?.[1]
